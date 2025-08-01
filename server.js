@@ -80,63 +80,67 @@ app.post('/api/download', async (req, res) => {
 
     console.log('Processing video:', videoId, `(clip: ${start}s to ${end}s)`);
 
-    // Determine the output directory based on user selection
-    let outputDir = path.join(__dirname, 'downloads');
+    // Always use the default downloads directory for temporary files and processing
+    const tempDir = path.join(__dirname, 'downloads');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    
+    const fullVideoPath = path.join(tempDir, `full-${filename}`);
+    const tempOutputPath = path.join(tempDir, filename);
+    
+    // Determine the final output directory based on user selection (only for the final file)
+    let finalOutputDir = tempDir; // Default to temp directory
     if (filepath && filepath.trim()) {
       const userHome = process.env.HOME || process.env.USERPROFILE;
       
       switch (filepath.toLowerCase()) {
         case 'downloads':
-          outputDir = path.join(userHome, 'Downloads');
+          finalOutputDir = path.join(userHome, 'Downloads');
           break;
         case 'desktop':
-          outputDir = path.join(userHome, 'Desktop');
+          finalOutputDir = path.join(userHome, 'Desktop');
           break;
         case 'documents':
-          outputDir = path.join(userHome, 'Documents');
+          finalOutputDir = path.join(userHome, 'Documents');
           break;
         case 'music':
-          outputDir = path.join(userHome, 'Music');
+          finalOutputDir = path.join(userHome, 'Music');
           break;
         case 'videos':
-          outputDir = path.join(userHome, 'Videos');
+          finalOutputDir = path.join(userHome, 'Videos');
           break;
         case 'pictures':
-          outputDir = path.join(userHome, 'Pictures');
+          finalOutputDir = path.join(userHome, 'Pictures');
           break;
         case 'custom':
           // For custom paths, we'll use the default downloads folder
-          // In a real implementation, you might want to add a text input for custom paths
-          outputDir = path.join(__dirname, 'downloads');
+          finalOutputDir = path.join(__dirname, 'downloads');
           break;
         default:
           // If it's a custom path, try to resolve it safely
           try {
             const customPath = path.resolve(filepath.trim());
             if (customPath.startsWith(userHome || __dirname)) {
-              outputDir = customPath;
+              finalOutputDir = customPath;
             }
           } catch (error) {
             console.log('Invalid custom path, using default:', error.message);
           }
       }
-    }
-    
-    // Ensure the output directory exists
-    if (!fs.existsSync(outputDir)) {
-      try {
-        fs.mkdirSync(outputDir, { recursive: true });
-      } catch (error) {
-        console.log('Could not create directory, using default:', error.message);
-        outputDir = path.join(__dirname, 'downloads');
-        if (!fs.existsSync(outputDir)) {
-          fs.mkdirSync(outputDir, { recursive: true });
+      
+      // Ensure the final output directory exists
+      if (!fs.existsSync(finalOutputDir)) {
+        try {
+          fs.mkdirSync(finalOutputDir, { recursive: true });
+        } catch (error) {
+          console.log('Could not create final directory, using default:', error.message);
+          finalOutputDir = tempDir;
         }
       }
     }
     
-    const fullVideoPath = path.join(outputDir, `full-${filename}`);
-    const outputPath = path.join(outputDir, filename);
+    const outputPath = path.join(finalOutputDir, filename);
 
     // Download the video using yt-dlp with best quality and progress tracking
     console.log('Downloading video with yt-dlp...');
@@ -215,48 +219,60 @@ app.post('/api/download', async (req, res) => {
     }
     console.log(`Downloaded file size: ${stats.size} bytes`);
 
-    console.log('Creating clip...');
-    const duration = end - start;
-    await execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c copy "${outputPath}"`);
+                console.log('Creating clip...');
+            const duration = end - start;
+            await execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c copy "${tempOutputPath}"`);
 
-    // Verify the clip was created
-    const clipStats = fs.statSync(outputPath);
-    if (clipStats.size === 0) {
-      throw new Error('Generated clip is empty');
-    }
-    console.log(`Clip file size: ${clipStats.size} bytes`);
+            // Verify the clip was created
+            const clipStats = fs.statSync(tempOutputPath);
+            if (clipStats.size === 0) {
+              throw new Error('Generated clip is empty');
+            }
+            console.log(`Clip file size: ${clipStats.size} bytes`);
 
-    console.log('Clip created. Sending file...');
+            // Move the final file to the user's selected location
+            let finalOutputPath = tempOutputPath;
+            if (finalOutputDir !== tempDir) {
+              console.log(`Moving file to: ${outputPath}`);
+              fs.copyFileSync(tempOutputPath, outputPath);
+              fs.unlinkSync(tempOutputPath); // Remove the temp file
+              finalOutputPath = outputPath;
+            }
 
-    // Update progress to completed
-    downloadProgress = {
-      status: 'completed',
-      progress: 100,
-      remaining: 0,
-      stage: 'sending_file'
-    };
+            console.log('Clip created and moved to final location. Sending file...');
 
-    res.writeHead(200, {
-      'Content-Type': 'video/mp4',
-      'Content-Length': clipStats.size,
-      'Content-Disposition': `attachment; filename="${filename}"`
-    });
+            // Update progress to completed
+            downloadProgress = {
+              status: 'completed',
+              progress: 100,
+              remaining: 0,
+              stage: 'sending_file'
+            };
 
-    fs.createReadStream(outputPath).pipe(res);
+            res.writeHead(200, {
+              'Content-Type': 'video/mp4',
+              'Content-Length': clipStats.size,
+              'Content-Disposition': `attachment; filename="${filename}"`
+            });
 
-    res.on('finish', () => {
-      fs.unlink(fullVideoPath, () => {});
-      fs.unlink(outputPath, () => {});
-      console.log('Temporary files cleaned up');
-      
-      // Reset progress
-      downloadProgress = {
-        status: 'idle',
-        progress: 0,
-        remaining: null,
-        currentDownload: null
-      };
-    });
+            fs.createReadStream(finalOutputPath).pipe(res);
+
+            res.on('finish', () => {
+              fs.unlink(fullVideoPath, () => {});
+              // Only delete the final file if it's in the temp directory
+              if (finalOutputDir === tempDir) {
+                fs.unlink(outputPath, () => {});
+              }
+              console.log('Temporary files cleaned up');
+              
+              // Reset progress
+              downloadProgress = {
+                status: 'idle',
+                progress: 0,
+                remaining: null,
+                currentDownload: null
+              };
+            });
 
   } catch (error) {
     console.error('Download error:', error);
