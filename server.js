@@ -397,8 +397,8 @@ app.get('/api/progress', (req, res) => {
   res.json(downloadProgress);
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`yt-dlp Server running at http://localhost:${PORT}`);
+  console.log(`yt-dlp Server running on port ${PORT}`);
   checkYtDlp(); // Check on startup
 });

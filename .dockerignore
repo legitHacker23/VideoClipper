@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+client
+.git
+.gitignore
+README.md
+downloads
+*.mp4
+*.m4a
+*.webm
+*.mkv
+.DS_Store 
