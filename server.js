@@ -118,7 +118,8 @@ const requireAuth = (req, res, next) => {
       req.user = {
         id: userData.userId,
         displayName: userData.displayName,
-        email: userData.email
+        email: userData.email,
+        accessToken: userData.accessToken
       };
       return next();
     } else {
@@ -212,7 +213,8 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       tokenStore.set(token, {
         userId: req.user.id,
         displayName: req.user.displayName,
-        email: req.user.emails?.[0]?.value
+        email: req.user.emails?.[0]?.value,
+        accessToken: req.user.accessToken
       });
       req.session.frontendToken = token;
       req.session.userId = req.user.id;
