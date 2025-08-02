@@ -158,6 +158,8 @@ app.post('/api/download', async (req, res) => {
       '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
       '--progress-template', 'download:%(progress.downloaded_bytes)s/%(progress.total_bytes)s/%(progress.speed)s/%(progress.eta)s',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      '--no-check-certificates',
       '-o', fullVideoPath,
       url
     ]);
@@ -317,7 +319,7 @@ app.post('/api/info', async (req, res) => {
     }
 
     // Get video info using yt-dlp
-    const infoCommand = `yt-dlp --dump-json "${url}"`;
+    const infoCommand = `yt-dlp --dump-json --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" --no-check-certificates "${url}"`;
     const { stdout } = await execAsync(infoCommand);
     
     const videoInfo = JSON.parse(stdout);
@@ -356,7 +358,7 @@ app.post('/api/formats', async (req, res) => {
     }
 
     // Get available formats using yt-dlp
-    const formatsCommand = `yt-dlp --list-formats "${url}"`;
+    const formatsCommand = `yt-dlp --list-formats --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" --no-check-certificates "${url}"`;
     const { stdout } = await execAsync(formatsCommand);
     
     // Parse the formats output
