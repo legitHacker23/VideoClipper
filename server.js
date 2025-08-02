@@ -165,8 +165,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
   app.get('/auth/google/callback', 
     passport.authenticate('google', { 
-      failureRedirect: '/login',
-      successRedirect: '/dashboard'
+      failureRedirect: '/login'
     }), (req, res) => {
       console.log('OAuth callback completed, user:', req.user ? req.user.displayName : 'No user');
       console.log('Session ID:', req.sessionID);
@@ -180,13 +179,22 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       req.session.frontendToken = token;
       req.session.userId = req.user.id;
       
-      // Redirect to frontend with token
-      const frontendUrl = process.env.NODE_ENV === 'production' 
-        ? `https://viralclipper.netlify.app/?token=${token}`
-        : `http://localhost:5173/?token=${token}`;
-      
-      console.log('Redirecting to frontend with token:', frontendUrl);
-      res.redirect(frontendUrl);
+      // Save session before redirect
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+        } else {
+          console.log('Session saved successfully with token:', token);
+        }
+        
+        // Redirect to frontend with token
+        const frontendUrl = process.env.NODE_ENV === 'production' 
+          ? `https://viralclipper.netlify.app/?token=${token}`
+          : `http://localhost:5173/?token=${token}`;
+        
+        console.log('Redirecting to frontend with token:', frontendUrl);
+        res.redirect(frontendUrl);
+      });
     }
   );
 } else {
