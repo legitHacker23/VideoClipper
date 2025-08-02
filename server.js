@@ -110,6 +110,9 @@ let downloadProgress = {
   currentDownload: null
 };
 
+// In-memory token store for frontend authentication
+const tokenStore = new Map();
+
 // Add CORS support for frontend
 app.use((req, res, next) => {
   // Allow specific origins for credentials
@@ -175,7 +178,12 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       // Generate a temporary token for the frontend
       const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       
-      // Store the token in session
+      // Store the token in memory and session
+      tokenStore.set(token, {
+        userId: req.user.id,
+        displayName: req.user.displayName,
+        email: req.user.emails?.[0]?.value
+      });
       req.session.frontendToken = token;
       req.session.userId = req.user.id;
       
@@ -267,19 +275,21 @@ app.get('/auth/verify-token', (req, res) => {
     return res.json({ authenticated: false, error: 'No token provided' });
   }
   
-  // Find session with this token
-  if (req.session.frontendToken === token) {
-    console.log('Token verified successfully');
+  // Check in-memory token store
+  const userData = tokenStore.get(token);
+  if (userData) {
+    console.log('Token verified successfully from memory store');
     res.json({
       authenticated: true,
       user: {
-        id: req.session.userId,
-        displayName: req.user?.displayName || 'User',
-        email: req.user?.emails?.[0]?.value || ''
+        id: userData.userId,
+        displayName: userData.displayName,
+        email: userData.email
       }
     });
   } else {
-    console.log('Token verification failed');
+    console.log('Token verification failed - token not found in memory store');
+    console.log('Available tokens:', Array.from(tokenStore.keys()));
     res.json({ authenticated: false, error: 'Invalid token' });
   }
 });
