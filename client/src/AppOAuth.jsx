@@ -1,13 +1,21 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-export default function App() {
+export default function AppOAuth() {
   // API helper function
   const getApiUrl = (endpoint) => {
     const baseUrl = window.location.hostname === 'localhost' 
       ? '' 
       : 'https://videoclipper-backend.onrender.com';
     return `${baseUrl}/api/${endpoint}`;
+  };
+
+  // Auth helper function
+  const getAuthUrl = () => {
+    const baseUrl = window.location.hostname === 'localhost' 
+      ? 'http://localhost:3001' 
+      : 'https://videoclipper-backend.onrender.com';
+    return `${baseUrl}/auth/google`;
   };
 
   const [url, setUrl] = useState('');
@@ -21,6 +29,66 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadStage, setDownloadStage] = useState('');
   const [videoInfo, setVideoInfo] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState(null);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
+
+  // Check authentication status on component mount
+  useEffect(() => {
+    // Add a small delay to ensure session is established after OAuth redirect
+    const timer = setTimeout(() => {
+      checkAuthStatus();
+    }, 500);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const baseUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3001' 
+        : 'https://videoclipper-backend.onrender.com';
+      
+      const res = await fetch(`${baseUrl}/auth/status`, {
+        credentials: 'include'
+      });
+      const data = await res.json();
+      
+      if (data.authenticated) {
+        setIsAuthenticated(true);
+        setUser(data.user);
+        console.log('User authenticated:', data.user);
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        console.log('User not authenticated');
+      }
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      setIsAuthenticated(false);
+      setUser(null);
+    }
+  };
+
+  const handleGoogleSignIn = () => {
+    window.location.href = getAuthUrl();
+  };
+
+  const handleSignOut = async () => {
+    try {
+      const baseUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3001' 
+        : 'https://videoclipper-backend.onrender.com';
+      
+      await fetch(`${baseUrl}/auth/logout`, {
+        credentials: 'include'
+      });
+      setIsAuthenticated(false);
+      setUser(null);
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
 
   const formatTime = (seconds) => {
     const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
@@ -52,7 +120,9 @@ export default function App() {
   const pollDownloadProgress = () => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(getApiUrl('progress'));
+        const res = await fetch(getApiUrl('progress'), {
+          credentials: 'include'
+        });
         const data = await res.json();
         
         if (data.status === 'downloading') {
@@ -76,8 +146,6 @@ export default function App() {
       }
     }, 1000);
   };
-
-  const [showFolderPicker, setShowFolderPicker] = useState(false);
 
   const handleFolderPicker = () => {
     setShowFolderPicker(true);
@@ -103,29 +171,48 @@ export default function App() {
       alert('Please enter a YouTube URL');
       return;
     }
-    
-    setDownloading(true);
-    pollDownloadProgress();
 
-    const res = await fetch(getApiUrl('download'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, start, end, filename, filepath }),
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      alert('Download failed: ' + errorText);
-      setDownloading(false);
+    if (!isAuthenticated) {
+      alert('Please sign in with Google to download videos');
       return;
     }
 
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = window.URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    setDownloading(false);
+    setDownloading(true);
+    pollDownloadProgress();
+
+    try {
+      const res = await fetch(getApiUrl('download-oauth'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, start, end, filename, filepath }),
+        credentials: 'include'
+      });
+
+      if (res.status === 401) {
+        alert('Please sign in with Google to continue');
+        setIsAuthenticated(false);
+        setDownloading(false);
+        return;
+      }
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        alert('Download failed: ' + errorText);
+        setDownloading(false);
+        return;
+      }
+
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = window.URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setDownloading(false);
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Download failed. Please try again.');
+      setDownloading(false);
+    }
   };
 
   useEffect(() => {
@@ -136,11 +223,18 @@ export default function App() {
 
     const fetchDuration = async () => {
       try {
-        const res = await fetch(getApiUrl('info'), {
+        const res = await fetch(getApiUrl('info-oauth'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
+          body: JSON.stringify({ url }),
+          credentials: 'include'
         });
+
+        if (res.status === 401) {
+          alert('Please sign in with Google to continue');
+          setIsAuthenticated(false);
+          return;
+        }
 
         if (res.ok) {
           const data = await res.json();
@@ -162,6 +256,58 @@ export default function App() {
   const clipDuration = end - start;
   const isValidClip = clipDuration >= 3;
 
+  // Authentication UI
+  if (!isAuthenticated) {
+    return (
+      <div className="app-container">
+        <div className="header-section">
+          <div className="liquid-logo">
+            <div className="logo-core">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+            </div>
+            <div className="liquid-ripple"></div>
+            <div className="liquid-ripple"></div>
+            <div className="liquid-ripple"></div>
+          </div>
+          <h1 className="liquid-title">YouTube Clip</h1>
+          <p className="liquid-subtitle">Sign in with Google to download and trim your favorite videos</p>
+        </div>
+
+        <div className="main-content">
+          <div className="liquid-card auth-card">
+            <div className="card-glow"></div>
+            <h2 className="liquid-heading">Welcome to Video Clipper</h2>
+            <p style={{ textAlign: 'center', marginBottom: '2rem', color: '#cccccc' }}>
+              This app allows you to create clips from YouTube videos using your Google account.
+            </p>
+            
+            <button 
+              className="liquid-button"
+              onClick={handleGoogleSignIn}
+            >
+              <div className="button-glow"></div>
+              <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" style={{ width: '20px', height: '20px', marginRight: '12px' }} />
+              Sign in with Google
+            </button>
+            
+            <div style={{ marginTop: '2rem', textAlign: 'left', background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h3 style={{ color: '#ffd700', marginBottom: '1rem', fontSize: '1.2rem' }}>Why Google Sign-in?</h3>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Access to YouTube Data API</li>
+                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Bypass bot detection</li>
+                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Secure authentication</li>
+                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Your own account permissions</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main app UI (when authenticated)
   return (
     <div className="app-container">
       <div className="header-section">
@@ -176,7 +322,24 @@ export default function App() {
           <div className="liquid-ripple"></div>
         </div>
         <h1 className="liquid-title">YouTube Clip</h1>
-        <p className="liquid-subtitle">Download and trim your favorite videos</p>
+        <p className="liquid-subtitle">
+          Welcome, {user?.displayName || 'User'}! 
+          <button 
+            onClick={handleSignOut} 
+            style={{ 
+              background: 'rgba(255,255,255,0.1)', 
+              border: '1px solid rgba(255,255,255,0.2)', 
+              color: '#ffffff', 
+              padding: '4px 8px', 
+              borderRadius: '4px', 
+              fontSize: '0.8rem', 
+              cursor: 'pointer',
+              marginLeft: '1rem'
+            }}
+          >
+            Sign Out
+          </button>
+        </p>
       </div>
 
       <div className="main-content">
@@ -406,4 +569,4 @@ export default function App() {
       )}
     </div>
   );
-}
+} 

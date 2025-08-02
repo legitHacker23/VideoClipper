@@ -6,6 +6,14 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
+import dotenv from 'dotenv';
+import passport from 'passport';
+import GoogleStrategy from 'passport-google-oauth20';
+import session from 'express-session';
+import { google } from 'googleapis';
+
+// Load environment variables
+dotenv.config();
 
 const execAsync = promisify(exec);
 
@@ -14,6 +22,79 @@ const __dirname = dirname(__filename);
 
 const app = express();
 app.use(bodyParser.json());
+
+// Session configuration for OAuth
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: true,
+  saveUninitialized: true,
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Configure Google OAuth Strategy
+passport.use(new GoogleStrategy({
+  clientID: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL: process.env.GOOGLE_REDIRECT_URI || "http://localhost:3001/auth/google/callback",
+  scope: [
+    'https://www.googleapis.com/auth/youtube.readonly',
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/userinfo.email'
+  ]
+}, async (accessToken, refreshToken, profile, done) => {
+  try {
+    // Store tokens in user profile
+    profile.accessToken = accessToken;
+    profile.refreshToken = refreshToken;
+    
+    // Create or update user in your database here
+    // For now, we'll just return the profile
+    return done(null, profile);
+  } catch (error) {
+    return done(error, null);
+  }
+}));
+
+// Serialize user for session
+passport.serializeUser((user, done) => {
+  done(null, user);
+});
+
+// Deserialize user from session
+passport.deserializeUser((user, done) => {
+  done(null, user);
+});
+
+// Create YouTube API client helper
+const createYouTubeClient = (accessToken) => {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+
+  oauth2Client.setCredentials({
+    access_token: accessToken
+  });
+
+  return google.youtube({ version: 'v3', auth: oauth2Client });
+};
+
+// Middleware to check authentication
+const requireAuth = (req, res, next) => {
+  if (req.isAuthenticated()) {
+    return next();
+  }
+  res.status(401).json({ error: 'Authentication required' });
+};
 
 // Global progress tracking
 let downloadProgress = {
@@ -25,12 +106,25 @@ let downloadProgress = {
 
 // Add CORS support for frontend
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  // Allow specific origins for credentials
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://viralclipper.netlify.app'
+  ];
+  
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.header('Pragma', 'no-cache');
   res.header('Expires', '0');
+  
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
   } else {
@@ -59,7 +153,144 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
-app.post('/api/download', async (req, res) => {
+// OAuth Routes
+app.get('/auth/google', passport.authenticate('google'));
+
+app.get('/auth/google/callback', 
+  passport.authenticate('google', { 
+    failureRedirect: '/login',
+    successRedirect: '/dashboard'
+  }), (req, res) => {
+    console.log('OAuth callback completed, user:', req.user ? req.user.displayName : 'No user');
+    console.log('Session ID:', req.sessionID);
+    console.log('Is authenticated:', req.isAuthenticated());
+  }
+);
+
+app.get('/auth/logout', (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    res.redirect('/');
+  });
+});
+
+// Redirect to frontend after OAuth success
+app.get('/dashboard', (req, res) => {
+  const frontendUrl = process.env.NODE_ENV === 'production' 
+    ? 'https://viralclipper.netlify.app/'
+    : 'http://localhost:5173/';
+  res.redirect(frontendUrl);
+});
+
+// Redirect to frontend login page
+app.get('/login', (req, res) => {
+  const frontendUrl = process.env.NODE_ENV === 'production' 
+    ? 'https://viralclipper.netlify.app/login'
+    : 'http://localhost:5173/login';
+  res.redirect(frontendUrl);
+});
+
+// Check authentication status
+app.get('/auth/status', (req, res) => {
+  console.log('Auth status check - Session ID:', req.sessionID);
+  console.log('Is authenticated:', req.isAuthenticated());
+  console.log('User:', req.user ? req.user.displayName : 'No user');
+  
+  if (req.isAuthenticated()) {
+    res.json({
+      authenticated: true,
+      user: {
+        id: req.user.id,
+        displayName: req.user.displayName,
+        email: req.user.emails?.[0]?.value
+      }
+    });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    oauth: !!process.env.GOOGLE_CLIENT_ID
+  });
+});
+
+// OAuth-protected video info endpoint using YouTube Data API
+app.post('/api/info-oauth', requireAuth, async (req, res) => {
+  try {
+    const { url } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    const videoId = extractVideoId(url);
+    if (!videoId) {
+      return res.status(400).json({ error: 'Invalid YouTube URL' });
+    }
+
+    // Create YouTube client with user's access token
+    const youtube = createYouTubeClient(req.user.accessToken);
+
+    // Get video details using YouTube Data API
+    const response = await youtube.videos.list({
+      part: 'snippet,contentDetails,statistics',
+      id: videoId
+    });
+
+    if (!response.data.items || response.data.items.length === 0) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+
+    const video = response.data.items[0];
+    const snippet = video.snippet;
+    const contentDetails = video.contentDetails;
+    const statistics = video.statistics;
+
+    // Convert duration from ISO 8601 to seconds
+    const durationMatch = contentDetails.duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    const hours = parseInt(durationMatch[1] || 0);
+    const minutes = parseInt(durationMatch[2] || 0);
+    const seconds = parseInt(durationMatch[3] || 0);
+    const durationInSeconds = hours * 3600 + minutes * 60 + seconds;
+
+    res.json({
+      success: true,
+      title: snippet.title,
+      duration: durationInSeconds,
+      author: snippet.channelTitle,
+      viewCount: parseInt(statistics.viewCount || 0),
+      uploadDate: snippet.publishedAt.split('T')[0].replace(/-/g, ''),
+      description: snippet.description?.substring(0, 200) + '...',
+      thumbnail: snippet.thumbnails?.high?.url || snippet.thumbnails?.medium?.url
+    });
+
+  } catch (error) {
+    console.error('Error in /api/info-oauth:', error);
+    
+    if (error.code === 401) {
+      res.status(401).json({ 
+        error: 'YouTube access token expired. Please sign in again.',
+        type: 'token_expired'
+      });
+    } else {
+      res.status(500).json({ 
+        error: 'Failed to fetch video info',
+        details: error.message 
+      });
+    }
+  }
+});
+
+// OAuth-protected download endpoint
+app.post('/api/download-oauth', requireAuth, async (req, res) => {
   try {
     const { url, filename = `video-${Date.now()}.mp4`, start = 0, end = 10, filepath } = req.body;
     
@@ -98,65 +329,20 @@ app.post('/api/download', async (req, res) => {
     }
     
     const fullVideoPath = path.join(tempDir, `full-${filename}`);
-    const tempOutputPath = path.join(tempDir, filename);
+    const tempOutputPath = path.join(tempDir, `clip-${filename}`);
     
-    // Determine the final output directory based on user selection (only for the final file)
-    let finalOutputDir = tempDir; // Default to temp directory
-    if (filepath && filepath.trim()) {
-      const userHome = process.env.HOME || process.env.USERPROFILE;
-      
-      switch (filepath.toLowerCase()) {
-        case 'downloads':
-          finalOutputDir = path.join(userHome, 'Downloads');
-          break;
-        case 'desktop':
-          finalOutputDir = path.join(userHome, 'Desktop');
-          break;
-        case 'documents':
-          finalOutputDir = path.join(userHome, 'Documents');
-          break;
-        case 'music':
-          finalOutputDir = path.join(userHome, 'Music');
-          break;
-        case 'videos':
-          finalOutputDir = path.join(userHome, 'Videos');
-          break;
-        case 'pictures':
-          finalOutputDir = path.join(userHome, 'Pictures');
-          break;
-        case 'custom':
-          // For custom paths, we'll use the default downloads folder
-          finalOutputDir = path.join(__dirname, 'downloads');
-          break;
-        default:
-          // If it's a custom path, try to resolve it safely
-          try {
-            const customPath = path.resolve(filepath.trim());
-            if (customPath.startsWith(userHome || __dirname)) {
-              finalOutputDir = customPath;
-            }
-          } catch (error) {
-            console.log('Invalid custom path, using default:', error.message);
-          }
-      }
-      
-      // Ensure the final output directory exists
-      if (!fs.existsSync(finalOutputDir)) {
-        try {
-          fs.mkdirSync(finalOutputDir, { recursive: true });
-        } catch (error) {
-          console.log('Could not create final directory, using default:', error.message);
-          finalOutputDir = tempDir;
-        }
-      }
+    // Determine final output directory
+    const finalOutputDir = filepath ? path.dirname(filepath) : tempDir;
+    const outputPath = filepath || path.join(tempDir, filename);
+    
+    // Ensure output directory exists
+    if (!fs.existsSync(finalOutputDir)) {
+      fs.mkdirSync(finalOutputDir, { recursive: true });
     }
-    
-    const outputPath = path.join(finalOutputDir, filename);
 
-    // Download the video using yt-dlp with best quality and progress tracking
+    // Download video using yt-dlp
     console.log('Downloading video with yt-dlp...');
     
-    // Use spawn to capture real-time output
     const ytdlpProcess = spawn('yt-dlp', [
       '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
@@ -233,60 +419,61 @@ app.post('/api/download', async (req, res) => {
     }
     console.log(`Downloaded file size: ${stats.size} bytes`);
 
-                console.log('Creating clip...');
-            const duration = end - start;
-            await execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c copy "${tempOutputPath}"`);
+    // Create clip using ffmpeg
+    console.log('Creating clip...');
+    const duration = end - start;
+    await execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c copy "${tempOutputPath}"`);
 
-            // Verify the clip was created
-            const clipStats = fs.statSync(tempOutputPath);
-            if (clipStats.size === 0) {
-              throw new Error('Generated clip is empty');
-            }
-            console.log(`Clip file size: ${clipStats.size} bytes`);
+    // Verify the clip was created
+    const clipStats = fs.statSync(tempOutputPath);
+    if (clipStats.size === 0) {
+      throw new Error('Generated clip is empty');
+    }
+    console.log(`Clip file size: ${clipStats.size} bytes`);
 
-            // Move the final file to the user's selected location
-            let finalOutputPath = tempOutputPath;
-            if (finalOutputDir !== tempDir) {
-              console.log(`Moving file to: ${outputPath}`);
-              fs.copyFileSync(tempOutputPath, outputPath);
-              fs.unlinkSync(tempOutputPath); // Remove the temp file
-              finalOutputPath = outputPath;
-            }
+    // Move the final file to the user's selected location
+    let finalOutputPath = tempOutputPath;
+    if (finalOutputDir !== tempDir) {
+      console.log(`Moving file to: ${outputPath}`);
+      fs.copyFileSync(tempOutputPath, outputPath);
+      fs.unlinkSync(tempOutputPath); // Remove the temp file
+      finalOutputPath = outputPath;
+    }
 
-            console.log('Clip created and moved to final location. Sending file...');
+    console.log('Clip created and moved to final location. Sending file...');
 
-            // Update progress to completed
-            downloadProgress = {
-              status: 'completed',
-              progress: 100,
-              remaining: 0,
-              stage: 'sending_file'
-            };
+    // Update progress to completed
+    downloadProgress = {
+      status: 'completed',
+      progress: 100,
+      remaining: 0,
+      stage: 'sending_file'
+    };
 
-            res.writeHead(200, {
-              'Content-Type': 'video/mp4',
-              'Content-Length': clipStats.size,
-              'Content-Disposition': `attachment; filename="${filename}"`
-            });
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Content-Length': clipStats.size,
+      'Content-Disposition': `attachment; filename="${filename}"`
+    });
 
-            fs.createReadStream(finalOutputPath).pipe(res);
+    fs.createReadStream(finalOutputPath).pipe(res);
 
-            res.on('finish', () => {
-              fs.unlink(fullVideoPath, () => {});
-              // Only delete the final file if it's in the temp directory
-              if (finalOutputDir === tempDir) {
-                fs.unlink(outputPath, () => {});
-              }
-              console.log('Temporary files cleaned up');
-              
-              // Reset progress
-              downloadProgress = {
-                status: 'idle',
-                progress: 0,
-                remaining: null,
-                currentDownload: null
-              };
-            });
+    res.on('finish', () => {
+      fs.unlink(fullVideoPath, () => {});
+      // Only delete the final file if it's in the temp directory
+      if (finalOutputDir === tempDir) {
+        fs.unlink(outputPath, () => {});
+      }
+      console.log('Temporary files cleaned up');
+      
+      // Reset progress
+      downloadProgress = {
+        status: 'idle',
+        progress: 0,
+        remaining: null,
+        currentDownload: null
+      };
+    });
 
   } catch (error) {
     console.error('Download error:', error);
@@ -308,118 +495,31 @@ app.post('/api/download', async (req, res) => {
   }
 });
 
-// Simple endpoint to get video info
-app.post('/api/info', async (req, res) => {
-  try {
-    const { url } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
-    }
-
-    // Check if yt-dlp is available
-    if (!(await checkYtDlp())) {
-      return res.status(500).json({ error: 'yt-dlp is not installed' });
-    }
-
-    // Get video info using yt-dlp
-    const infoCommand = `yt-dlp --dump-json --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --no-check-certificates --extractor-args "youtube:player_client=android" --no-warnings --quiet "${url}"`;
-    const { stdout } = await execAsync(infoCommand);
-    
-    const videoInfo = JSON.parse(stdout);
-    
-    res.json({
-      success: true,
-      title: videoInfo.title,
-      duration: videoInfo.duration,
-      author: videoInfo.uploader,
-      viewCount: videoInfo.view_count,
-      uploadDate: videoInfo.upload_date,
-      description: videoInfo.description?.substring(0, 200) + '...',
-      thumbnail: videoInfo.thumbnail
-    });
-  } catch (error) {
-    console.error('Error in /api/info:', error);
-    
-    // If YouTube blocks the request, return a fallback response
-    if (error.message.includes('Sign in to confirm you\'re not a bot') || error.message.includes('bot')) {
-      res.json({
-        success: true,
-        title: 'Video Title (YouTube Bot Detection Active)',
-        duration: 600,
-        author: 'YouTube Channel',
-        viewCount: 0,
-        uploadDate: '20250101',
-        description: 'YouTube is currently blocking automated requests. Please try again later or use a different video.',
-        thumbnail: 'https://via.placeholder.com/480x360?text=Video+Unavailable'
-      });
-    } else {
-      res.status(500).json({ 
-        error: 'Failed to fetch video info',
-        details: error.message 
-      });
-    }
-  }
-});
-
-// Endpoint to get available formats
-app.post('/api/formats', async (req, res) => {
-  try {
-    const { url } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
-    }
-
-    // Check if yt-dlp is available
-    if (!(await checkYtDlp())) {
-      return res.status(500).json({ error: 'yt-dlp is not installed' });
-    }
-
-    // Get available formats using yt-dlp
-    const formatsCommand = `yt-dlp --list-formats --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --no-check-certificates --extractor-args "youtube:player_client=android" "${url}"`;
-    const { stdout } = await execAsync(formatsCommand);
-    
-    // Parse the formats output
-    const lines = stdout.split('\n').filter(line => line.trim());
-    const formats = [];
-    
-    for (const line of lines) {
-      // Skip header lines
-      if (line.includes('ID') && line.includes('EXT')) continue;
-      if (line.includes('---')) continue;
-      
-      const parts = line.split(/\s+/);
-      if (parts.length >= 4) {
-        formats.push({
-          id: parts[0],
-          extension: parts[1],
-          resolution: parts[2],
-          note: parts.slice(3).join(' ')
-        });
-      }
-    }
-
-    res.json({
-      success: true,
-      formats: formats
-    });
-  } catch (error) {
-    console.error('Error in /api/formats:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch video formats',
-      details: error.message 
-    });
-  }
-});
-
 // Progress endpoint for frontend
 app.get('/api/progress', (req, res) => {
   res.json(downloadProgress);
 });
 
+// Modified original endpoints that require authentication
+app.post('/api/download', async (req, res) => {
+  res.status(401).json({ 
+    error: 'Authentication required. Please use /api/download-oauth with Google OAuth.',
+    type: 'auth_required'
+  });
+});
+
+app.post('/api/info', async (req, res) => {
+  res.status(401).json({ 
+    error: 'Authentication required. Please use /api/info-oauth with Google OAuth.',
+    type: 'auth_required'
+  });
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`yt-dlp Server running on port ${PORT}`);
+  console.log(`Video Clipper Server running on port ${PORT}`);
+  console.log(`OAuth enabled: ${!!process.env.GOOGLE_CLIENT_ID}`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`Auth status: http://localhost:${PORT}/auth/status`);
   checkYtDlp(); // Check on startup
 });
