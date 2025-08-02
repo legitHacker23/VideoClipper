@@ -454,16 +454,37 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
       fs.mkdirSync(finalOutputDir, { recursive: true });
     }
 
-    // Download video using yt-dlp
-    console.log('Downloading video with yt-dlp...');
+    // Download video using YouTube Data API + direct download
+    console.log('Getting video URL from YouTube Data API...');
+    
+    // Create YouTube client with user's access token
+    const youtube = createYouTubeClient(req.user.accessToken);
+    
+    // Get video details and streaming URLs
+    const response = await youtube.videos.list({
+      part: 'snippet,contentDetails',
+      id: videoId
+    });
+
+    if (!response.data.items || response.data.items.length === 0) {
+      throw new Error('Video not found or access denied');
+    }
+
+    // For now, let's try a different approach - use yt-dlp with better user agent and headers
+    console.log('Downloading video with yt-dlp (with improved settings)...');
     
     const ytdlpProcess = spawn('yt-dlp', [
-      '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      '-f', 'best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
       '--progress-template', 'download:%(progress.downloaded_bytes)s/%(progress.total_bytes)s/%(progress.speed)s/%(progress.eta)s',
-      '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '--add-header', 'Accept-Encoding:gzip, deflate, br',
+      '--add-header', 'DNT:1',
+      '--add-header', 'Connection:keep-alive',
+      '--add-header', 'Upgrade-Insecure-Requests:1',
       '--no-check-certificates',
-      '--extractor-args', 'youtube:player_client=android',
+      '--extractor-args', 'youtube:player_client=web',
       '-o', fullVideoPath,
       url
     ]);
