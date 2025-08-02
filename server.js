@@ -39,29 +39,33 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Configure Google OAuth Strategy
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: process.env.GOOGLE_REDIRECT_URI || "http://localhost:3001/auth/google/callback",
-  scope: [
-    'https://www.googleapis.com/auth/youtube.readonly',
-    'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/userinfo.email'
-  ]
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    // Store tokens in user profile
-    profile.accessToken = accessToken;
-    profile.refreshToken = refreshToken;
-    
-    // Create or update user in your database here
-    // For now, we'll just return the profile
-    return done(null, profile);
-  } catch (error) {
-    return done(error, null);
-  }
-}));
+// Configure Google OAuth Strategy (only if credentials are available)
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_REDIRECT_URI || "http://localhost:3001/auth/google/callback",
+    scope: [
+      'https://www.googleapis.com/auth/youtube.readonly',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email'
+    ]
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      // Store tokens in user profile
+      profile.accessToken = accessToken;
+      profile.refreshToken = refreshToken;
+      
+      // Create or update user in your database here
+      // For now, we'll just return the profile
+      return done(null, profile);
+    } catch (error) {
+      return done(error, null);
+    }
+  }));
+} else {
+  console.warn('Google OAuth credentials not found. OAuth features will be disabled.');
+}
 
 // Serialize user for session
 passport.serializeUser((user, done) => {
@@ -153,19 +157,31 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
-// OAuth Routes
-app.get('/auth/google', passport.authenticate('google'));
+// OAuth Routes (only if OAuth is configured)
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  app.get('/auth/google', passport.authenticate('google'));
 
-app.get('/auth/google/callback', 
-  passport.authenticate('google', { 
-    failureRedirect: '/login',
-    successRedirect: '/dashboard'
-  }), (req, res) => {
-    console.log('OAuth callback completed, user:', req.user ? req.user.displayName : 'No user');
-    console.log('Session ID:', req.sessionID);
-    console.log('Is authenticated:', req.isAuthenticated());
-  }
-);
+  app.get('/auth/google/callback', 
+    passport.authenticate('google', { 
+      failureRedirect: '/login',
+      successRedirect: '/dashboard'
+    }), (req, res) => {
+      console.log('OAuth callback completed, user:', req.user ? req.user.displayName : 'No user');
+      console.log('Session ID:', req.sessionID);
+      console.log('Is authenticated:', req.isAuthenticated());
+      console.log('Session data:', req.session);
+    }
+  );
+} else {
+  // Fallback routes when OAuth is not configured
+  app.get('/auth/google', (req, res) => {
+    res.status(503).json({ error: 'OAuth not configured' });
+  });
+
+  app.get('/auth/google/callback', (req, res) => {
+    res.status(503).json({ error: 'OAuth not configured' });
+  });
+}
 
 app.get('/auth/logout', (req, res) => {
   req.logout((err) => {
@@ -182,14 +198,16 @@ app.get('/dashboard', (req, res) => {
   const frontendUrl = process.env.NODE_ENV === 'production' 
     ? 'https://viralclipper.netlify.app/'
     : 'http://localhost:5173/';
+  console.log('Redirecting to frontend:', frontendUrl);
   res.redirect(frontendUrl);
 });
 
 // Redirect to frontend login page
 app.get('/login', (req, res) => {
   const frontendUrl = process.env.NODE_ENV === 'production' 
-    ? 'https://viralclipper.netlify.app/login'
-    : 'http://localhost:5173/login';
+    ? 'https://viralclipper.netlify.app/'
+    : 'http://localhost:5173/';
+  console.log('Redirecting to frontend (login):', frontendUrl);
   res.redirect(frontendUrl);
 });
 
@@ -198,6 +216,8 @@ app.get('/auth/status', (req, res) => {
   console.log('Auth status check - Session ID:', req.sessionID);
   console.log('Is authenticated:', req.isAuthenticated());
   console.log('User:', req.user ? req.user.displayName : 'No user');
+  console.log('Origin:', req.headers.origin);
+  console.log('Cookie header:', req.headers.cookie ? 'Present' : 'Missing');
   
   if (req.isAuthenticated()) {
     res.json({
@@ -218,7 +238,8 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    oauth: !!process.env.GOOGLE_CLIENT_ID
+    oauth: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
