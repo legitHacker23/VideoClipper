@@ -28,6 +28,9 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.header('Pragma', 'no-cache');
+  res.header('Expires', '0');
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
   } else {
@@ -158,8 +161,9 @@ app.post('/api/download', async (req, res) => {
       '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
       '--merge-output-format', 'mp4',
       '--progress-template', 'download:%(progress.downloaded_bytes)s/%(progress.total_bytes)s/%(progress.speed)s/%(progress.eta)s',
-      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       '--no-check-certificates',
+      '--extractor-args', 'youtube:player_client=android',
       '-o', fullVideoPath,
       url
     ]);
@@ -319,7 +323,7 @@ app.post('/api/info', async (req, res) => {
     }
 
     // Get video info using yt-dlp
-    const infoCommand = `yt-dlp --dump-json --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" --no-check-certificates "${url}"`;
+    const infoCommand = `yt-dlp --dump-json --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --no-check-certificates --extractor-args "youtube:player_client=android" "${url}"`;
     const { stdout } = await execAsync(infoCommand);
     
     const videoInfo = JSON.parse(stdout);
@@ -358,7 +362,7 @@ app.post('/api/formats', async (req, res) => {
     }
 
     // Get available formats using yt-dlp
-    const formatsCommand = `yt-dlp --list-formats --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" --no-check-certificates "${url}"`;
+    const formatsCommand = `yt-dlp --list-formats --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --no-check-certificates --extractor-args "youtube:player_client=android" "${url}"`;
     const { stdout } = await execAsync(formatsCommand);
     
     // Parse the formats output
