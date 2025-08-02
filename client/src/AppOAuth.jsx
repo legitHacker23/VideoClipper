@@ -309,11 +309,16 @@ export default function AppOAuth() {
     }
 
     const fetchDuration = async () => {
+      // Don't make API calls if not authenticated
+      if (!isAuthenticated || !authToken) {
+        console.log('Skipping API call - not authenticated or no token');
+        return;
+      }
+      
       try {
         const headers = { 'Content-Type': 'application/json' };
-        if (authToken) {
-          headers['Authorization'] = `Bearer ${authToken}`;
-        }
+        headers['Authorization'] = `Bearer ${authToken}`;
+        console.log('Sending API request with token:', authToken);
         
         const res = await fetch(getApiUrl('info-oauth'), {
           method: 'POST',

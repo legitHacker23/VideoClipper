@@ -96,9 +96,39 @@ const createYouTubeClient = (accessToken) => {
 
 // Middleware to check authentication
 const requireAuth = (req, res, next) => {
+  console.log('requireAuth - checking authentication for:', req.path);
+  console.log('Session authenticated:', req.isAuthenticated());
+  console.log('Authorization header:', req.headers.authorization);
+  
+  // Check if user is authenticated via session
   if (req.isAuthenticated()) {
+    console.log('User authenticated via session');
     return next();
   }
+  
+  // Check if user is authenticated via token
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    console.log('Checking token:', token);
+    const userData = tokenStore.get(token);
+    if (userData) {
+      console.log('User authenticated via token:', userData.displayName);
+      // Add user info to request for API endpoints
+      req.user = {
+        id: userData.userId,
+        displayName: userData.displayName,
+        email: userData.email
+      };
+      return next();
+    } else {
+      console.log('Token not found in store');
+    }
+  } else {
+    console.log('No authorization header or invalid format');
+  }
+  
+  console.log('Authentication failed');
   res.status(401).json({ error: 'Authentication required' });
 };
 
