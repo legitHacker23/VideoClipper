@@ -35,13 +35,54 @@ export default function AppOAuth() {
 
   // Check authentication status on component mount
   useEffect(() => {
-    // Add a small delay to ensure session is established after OAuth redirect
-    const timer = setTimeout(() => {
-      checkAuthStatus();
-    }, 500);
+    // Check for token in URL (from OAuth redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
     
-    return () => clearTimeout(timer);
+    if (token) {
+      // Remove token from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // Verify token
+      verifyToken(token);
+    } else {
+      // Add a small delay to ensure session is established after OAuth redirect
+      const timer = setTimeout(() => {
+        checkAuthStatus();
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
   }, []);
+
+  const verifyToken = async (token) => {
+    try {
+      let url;
+      if (window.location.hostname === 'localhost') {
+        url = `http://localhost:3001/auth/verify-token?token=${token}`;
+      } else {
+        url = `https://videoclipper-backend.onrender.com/auth/verify-token?token=${token}`;
+      }
+      
+      const res = await fetch(url, {
+        credentials: 'include'
+      });
+      const data = await res.json();
+      
+      if (data.authenticated) {
+        setIsAuthenticated(true);
+        setUser(data.user);
+        console.log('User authenticated via token:', data.user);
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        console.log('Token verification failed');
+      }
+    } catch (error) {
+      console.error('Error verifying token:', error);
+      setIsAuthenticated(false);
+      setUser(null);
+    }
+  };
 
   const checkAuthStatus = async () => {
     try {
@@ -74,7 +115,11 @@ export default function AppOAuth() {
   };
 
   const handleGoogleSignIn = () => {
-    window.location.href = getAuthUrl();
+    if (window.location.hostname === 'localhost') {
+      window.location.href = getAuthUrl();
+    } else {
+      window.location.href = '/.netlify/functions/auth-google';
+    }
   };
 
   const handleSignOut = async () => {
