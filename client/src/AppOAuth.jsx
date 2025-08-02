@@ -45,11 +45,14 @@ export default function AppOAuth() {
 
   const checkAuthStatus = async () => {
     try {
-      const baseUrl = window.location.hostname === 'localhost' 
-        ? 'http://localhost:3001' 
-        : 'https://videoclipper-backend.onrender.com';
+      let url;
+      if (window.location.hostname === 'localhost') {
+        url = 'http://localhost:3001/auth/status';
+      } else {
+        url = '/.netlify/functions/auth-status';
+      }
       
-      const res = await fetch(`${baseUrl}/auth/status`, {
+      const res = await fetch(url, {
         credentials: 'include'
       });
       const data = await res.json();
@@ -76,11 +79,14 @@ export default function AppOAuth() {
 
   const handleSignOut = async () => {
     try {
-      const baseUrl = window.location.hostname === 'localhost' 
-        ? 'http://localhost:3001' 
-        : 'https://videoclipper-backend.onrender.com';
+      let url;
+      if (window.location.hostname === 'localhost') {
+        url = 'http://localhost:3001/auth/logout';
+      } else {
+        url = '/.netlify/functions/auth-logout';
+      }
       
-      await fetch(`${baseUrl}/auth/logout`, {
+      await fetch(url, {
         credentials: 'include'
       });
       setIsAuthenticated(false);
