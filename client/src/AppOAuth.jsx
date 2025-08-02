@@ -32,6 +32,7 @@ export default function AppOAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [authToken, setAuthToken] = useState(null);
 
   // Check authentication status on component mount
   useEffect(() => {
@@ -71,10 +72,12 @@ export default function AppOAuth() {
       if (data.authenticated) {
         setIsAuthenticated(true);
         setUser(data.user);
+        setAuthToken(token); // Store the token for API calls
         console.log('User authenticated via token:', data.user);
       } else {
         setIsAuthenticated(false);
         setUser(null);
+        setAuthToken(null);
         console.log('Token verification failed');
       }
     } catch (error) {
@@ -136,6 +139,7 @@ export default function AppOAuth() {
       });
       setIsAuthenticated(false);
       setUser(null);
+      setAuthToken(null);
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -171,7 +175,13 @@ export default function AppOAuth() {
   const pollDownloadProgress = () => {
     const interval = setInterval(async () => {
       try {
+        const headers = {};
+        if (authToken) {
+          headers['Authorization'] = `Bearer ${authToken}`;
+        }
+        
         const res = await fetch(getApiUrl('progress'), {
+          headers,
           credentials: 'include'
         });
         const data = await res.json();
@@ -232,9 +242,14 @@ export default function AppOAuth() {
     pollDownloadProgress();
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      
       const res = await fetch(getApiUrl('download-oauth'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ url, start, end, filename, filepath }),
         credentials: 'include'
       });
@@ -253,11 +268,32 @@ export default function AppOAuth() {
         return;
       }
 
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = window.URL.createObjectURL(blob);
-      a.download = filename;
-      a.click();
+      // Handle base64 response from Netlify Functions
+      if (window.location.hostname !== 'localhost') {
+        const data = await res.json();
+        if (data.body && data.isBase64Encoded) {
+          // Convert base64 to blob
+          const binaryString = atob(data.body);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: data.headers?.['content-type'] || 'video/mp4' });
+          const a = document.createElement('a');
+          a.href = window.URL.createObjectURL(blob);
+          a.download = filename;
+          a.click();
+        } else {
+          alert('Download failed: Invalid response format');
+        }
+      } else {
+        // Direct backend response (localhost)
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+      }
       setDownloading(false);
     } catch (error) {
       console.error('Download error:', error);
@@ -274,9 +310,14 @@ export default function AppOAuth() {
 
     const fetchDuration = async () => {
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) {
+          headers['Authorization'] = `Bearer ${authToken}`;
+        }
+        
         const res = await fetch(getApiUrl('info-oauth'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ url }),
           credentials: 'include'
         });
@@ -307,58 +348,7 @@ export default function AppOAuth() {
   const clipDuration = end - start;
   const isValidClip = clipDuration >= 3;
 
-  // Authentication UI
-  if (!isAuthenticated) {
-    return (
-      <div className="app-container">
-        <div className="header-section">
-          <div className="liquid-logo">
-            <div className="logo-core">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-              </svg>
-            </div>
-            <div className="liquid-ripple"></div>
-            <div className="liquid-ripple"></div>
-            <div className="liquid-ripple"></div>
-          </div>
-          <h1 className="liquid-title">YouTube Clip</h1>
-          <p className="liquid-subtitle">Sign in with Google to download and trim your favorite videos</p>
-        </div>
-
-        <div className="main-content">
-          <div className="liquid-card auth-card">
-            <div className="card-glow"></div>
-            <h2 className="liquid-heading">Welcome to Video Clipper</h2>
-            <p style={{ textAlign: 'center', marginBottom: '2rem', color: '#cccccc' }}>
-              This app allows you to create clips from YouTube videos using your Google account.
-            </p>
-            
-            <button 
-              className="liquid-button"
-              onClick={handleGoogleSignIn}
-            >
-              <div className="button-glow"></div>
-              <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" style={{ width: '20px', height: '20px', marginRight: '12px' }} />
-              Sign in with Google
-            </button>
-            
-            <div style={{ marginTop: '2rem', textAlign: 'left', background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <h3 style={{ color: '#ffd700', marginBottom: '1rem', fontSize: '1.2rem' }}>Why Google Sign-in?</h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Access to YouTube Data API</li>
-                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Bypass bot detection</li>
-                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Secure authentication</li>
-                <li style={{ padding: '0.5rem 0', color: '#cccccc' }}>✅ Your own account permissions</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Main app UI (when authenticated)
+  // Always show the main app, with login/logout button in header
   return (
     <div className="app-container">
       <div className="header-section">
@@ -374,23 +364,40 @@ export default function AppOAuth() {
         </div>
         <h1 className="liquid-title">YouTube Clip</h1>
         <p className="liquid-subtitle">
-          Welcome, {user?.displayName || 'User'}! 
-          <button 
-            onClick={handleSignOut} 
-            style={{ 
-              background: 'rgba(255,255,255,0.1)', 
-              border: '1px solid rgba(255,255,255,0.2)', 
-              color: '#ffffff', 
-              padding: '4px 8px', 
-              borderRadius: '4px', 
-              fontSize: '0.8rem', 
-              cursor: 'pointer',
-              marginLeft: '1rem'
-            }}
-          >
-            Sign Out
-          </button>
+          {isAuthenticated ? `Welcome, ${user?.displayName || 'User'}!` : 'Download and trim your favorite videos'}
         </p>
+        
+        {/* Login/Logout button in top right */}
+        <div style={{ position: 'absolute', top: '20px', right: '20px' }}>
+          {isAuthenticated ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ color: '#cccccc', fontSize: '0.9rem' }}>
+                {user?.displayName || 'User'}
+              </span>
+              <button 
+                className="liquid-button"
+                onClick={handleSignOut}
+                style={{ padding: '8px 16px', fontSize: '0.9rem' }}
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <button 
+              className="liquid-button"
+              onClick={handleGoogleSignIn}
+              style={{ padding: '8px 16px', fontSize: '0.9rem' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" style={{ marginRight: '6px' }}>
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Sign In
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="main-content">
