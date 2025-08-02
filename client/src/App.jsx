@@ -2,6 +2,14 @@ import { useState, useEffect } from 'react';
 import './App.css';
 
 export default function App() {
+  // API helper function
+  const getApiUrl = (endpoint) => {
+    const baseUrl = window.location.hostname === 'localhost' 
+      ? '' 
+      : 'https://videoclipper-backend.onrender.com';
+    return `${baseUrl}/api/${endpoint}`;
+  };
+
   const [url, setUrl] = useState('');
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(10);
@@ -44,7 +52,7 @@ export default function App() {
   const pollDownloadProgress = () => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('/api/progress');
+        const res = await fetch(getApiUrl('progress'));
         const data = await res.json();
         
         if (data.status === 'downloading') {
@@ -99,7 +107,7 @@ export default function App() {
     setDownloading(true);
     pollDownloadProgress();
 
-    const res = await fetch('/api/download', {
+    const res = await fetch(getApiUrl('download'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, start, end, filename, filepath }),
@@ -128,7 +136,7 @@ export default function App() {
 
     const fetchDuration = async () => {
       try {
-        const res = await fetch('/api/info', {
+        const res = await fetch(getApiUrl('info'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url })
