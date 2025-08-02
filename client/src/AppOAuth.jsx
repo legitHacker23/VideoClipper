@@ -60,7 +60,7 @@ export default function AppOAuth() {
       if (window.location.hostname === 'localhost') {
         url = `http://localhost:3001/auth/verify-token?token=${token}`;
       } else {
-        url = `https://videoclipper-backend.onrender.com/auth/verify-token?token=${token}`;
+        url = `/.netlify/functions/auth-verify-token?token=${token}`;
       }
       
       const res = await fetch(url, {

@@ -32,7 +32,8 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
   }
 }));
 
@@ -171,6 +172,21 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       console.log('Session ID:', req.sessionID);
       console.log('Is authenticated:', req.isAuthenticated());
       console.log('Session data:', req.session);
+      
+      // Generate a temporary token for the frontend
+      const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      
+      // Store the token in session
+      req.session.frontendToken = token;
+      req.session.userId = req.user.id;
+      
+      // Redirect to frontend with token
+      const frontendUrl = process.env.NODE_ENV === 'production' 
+        ? `https://viralclipper.netlify.app/?token=${token}`
+        : `http://localhost:5173/?token=${token}`;
+      
+      console.log('Redirecting to frontend with token:', frontendUrl);
+      res.redirect(frontendUrl);
     }
   );
 } else {
@@ -231,6 +247,32 @@ app.get('/auth/status', (req, res) => {
     });
   } else {
     res.json({ authenticated: false });
+  }
+});
+
+// Verify frontend token
+app.get('/auth/verify-token', (req, res) => {
+  const { token } = req.query;
+  console.log('Token verification request for token:', token);
+  
+  if (!token) {
+    return res.json({ authenticated: false, error: 'No token provided' });
+  }
+  
+  // Find session with this token
+  if (req.session.frontendToken === token) {
+    console.log('Token verified successfully');
+    res.json({
+      authenticated: true,
+      user: {
+        id: req.session.userId,
+        displayName: req.user?.displayName || 'User',
+        email: req.user?.emails?.[0]?.value || ''
+      }
+    });
+  } else {
+    console.log('Token verification failed');
+    res.json({ authenticated: false, error: 'Invalid token' });
   }
 });
 
