@@ -15,6 +15,14 @@ const __dirname = dirname(__filename);
 const app = express();
 app.use(bodyParser.json());
 
+// Global progress tracking
+let downloadProgress = {
+  status: 'idle',
+  progress: 0,
+  remaining: null,
+  currentDownload: null
+};
+
 // Add CORS support for frontend
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -383,14 +391,6 @@ app.post('/api/formats', async (req, res) => {
     });
   }
 });
-
-// Global progress tracking
-let downloadProgress = {
-  status: 'idle',
-  progress: 0,
-  remaining: null,
-  currentDownload: null
-};
 
 // Progress endpoint for frontend
 app.get('/api/progress', (req, res) => {
