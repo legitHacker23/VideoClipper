@@ -470,6 +470,7 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
       '--add-header', 'Accept-Language:en-US,en;q=0.9',
       '--add-header', 'DNT:1',
       '--no-check-certificates',
+      '--cookies', '/tmp/ytdlp_cookies.txt',
       '-o', fullVideoPath,
       url
     ]);
