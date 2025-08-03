@@ -2,11 +2,16 @@
   "name": "ytclips",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "electron/main.js",
+  "workspaces": ["client"],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server/server.js",
+    "dev": "cross-env NODE_ENV=development concurrently \"npm:dev:react\" \"npm:dev:express\" \"npm:dev:electron\"",
+    "dev:react": "npm --workspace client run dev",
+    "dev:express": "node server/server.js",
+    "dev:electron": "wait-on tcp:5173 && electron .",
+    "build": "npm --workspace client run build && electron-builder -mwl"
   },
   "keywords": [],
   "author": "",
@@ -20,5 +25,31 @@
     "googleapis": "^154.1.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.8.0",
+    "concurrently": "^8.0.1",
+    "cross-env": "^7.0.3",
+    "wait-on": "^7.0.1",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.8.10"
+  },
+  "build": {
+    "appId": "com.ytclips.desktop",
+    "files": [
+      "client/dist/**/*",
+      "server/**/*",
+      "electron/**/*",
+      "bin/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "bin", "to": "bin" }
+    ],
+    "asarUnpack": [ "bin/*" ],
+    "mac":  { "target": "dmg" },
+    "win":  { "target": "nsis", "publisherName": "YTClips" },
+    "linux":{ "target": "AppImage" }
   }
 }
