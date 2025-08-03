@@ -11,10 +11,6 @@ import passport from 'passport';
 import GoogleStrategy from 'passport-google-oauth20';
 import session from 'express-session';
 import { google } from 'googleapis';
-import { PROXY_CONFIGS, PROXY_SETTINGS, getRandomUserAgent, validateProxyUrl } from './proxy-config.js';
-
-// Make sure the pip‑installed yt‑dlp in ~/.local/bin is found first
-process.env.PATH = `${process.env.HOME}/.local/bin:` + process.env.PATH;
 
 // Load environment variables
 dotenv.config();
@@ -407,183 +403,10 @@ app.post('/api/info-oauth', requireAuth, async (req, res) => {
   }
 });
 
-// Add proxy configuration and retry logic
-// Function to test proxy connectivity
-async function testProxy(proxyUrl) {
-  try {
-    const testProcess = spawn('curl', [
-      '--proxy', proxyUrl,
-      '--connect-timeout', '10',
-      '--max-time', '30',
-      'https://www.youtube.com'
-    ]);
-    
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        testProcess.kill();
-        resolve(false);
-      }, PROXY_SETTINGS.testTimeout);
-      
-      testProcess.on('close', (code) => {
-        clearTimeout(timeout);
-        resolve(code === 0);
-      });
-    });
-  } catch (error) {
-    return false;
-  }
-}
-
-// Function to get a working proxy
-async function getWorkingProxy() {
-  const proxyFromEnv = process.env.YTDLP_PROXY;
-  if (proxyFromEnv) {
-    console.log('Using proxy from environment variable');
-    return { proxy: proxyFromEnv, name: 'env' };
-  }
-  
-  // Test proxies in parallel
-  const proxyTests = PROXY_CONFIGS.map(async (config) => {
-    const isWorking = await testProxy(config.proxy);
-    return { ...config, isWorking };
-  });
-  
-  const results = await Promise.all(proxyTests);
-  const workingProxies = results.filter(r => r.isWorking);
-  
-  if (workingProxies.length > 0) {
-    const selectedProxy = workingProxies[Math.floor(Math.random() * workingProxies.length)];
-    console.log(`Selected working proxy: ${selectedProxy.name}`);
-    return selectedProxy;
-  }
-  
-  console.log('No working proxies found, will try without proxy');
-  return null;
-}
-
-// Function to get a random proxy from the list (fallback)
-function getRandomProxy() {
-  const proxyFromEnv = process.env.YTDLP_PROXY;
-  if (proxyFromEnv) {
-    return { proxy: proxyFromEnv, name: 'env' };
-  }
-  
-  if (PROXY_CONFIGS.length > 0) {
-    return PROXY_CONFIGS[Math.floor(Math.random() * PROXY_CONFIGS.length)];
-  }
-  
-  return null;
-}
-
-// Function to download with yt-dlp with retry logic
-async function downloadWithYtDlp(url, outputPath, maxRetries = PROXY_SETTINGS.maxRetries) {
-  let lastError;
-  
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`Download attempt ${attempt}/${maxRetries}`);
-      
-      const proxyConfig = await getWorkingProxy();
-      const userAgent = getRandomUserAgent();
-      
-      const ytDlpArgs = [
-        '-f', 'best[ext=mp4]/best',
-        '--merge-output-format', 'mp4',
-        '--progress-template', 'download:%(progress.downloaded_bytes)s/%(progress.total_bytes)s/%(progress.speed)s/%(progress.eta)s',
-        '--user-agent', userAgent,
-        '--add-header', 'Accept-Language:en-US,en;q=0.9',
-        '--add-header', 'Accept-Encoding:gzip, deflate, br',
-        '--add-header', 'DNT:1',
-        '--add-header', 'Connection:keep-alive',
-        '--add-header', 'Upgrade-Insecure-Requests:1',
-        '--add-header', 'Sec-Fetch-Dest:document',
-        '--add-header', 'Sec-Fetch-Mode:navigate',
-        '--add-header', 'Sec-Fetch-Site:none',
-        '--add-header', 'Sec-Fetch-User:?1',
-        '--add-header', 'Cache-Control:max-age=0',
-        '--no-check-certificates',
-        '--retries', '3',
-        '--fragment-retries', '3',
-        '--sleep-interval', '2',
-        '--max-sleep-interval', '5',
-        '--concurrent-fragments', '1',
-        '--max-downloads', '1',
-        '--no-playlist',
-        '--no-warnings',
-        '--quiet',
-        '-o', outputPath,
-        url
-      ];
-
-      // Add proxy if available
-      if (proxyConfig) {
-        console.log(`Using proxy: ${proxyConfig.name}`);
-        ytDlpArgs.unshift('--proxy', proxyConfig.proxy);
-      } else {
-        console.log('No proxy configured, using direct connection');
-      }
-
-      const ytdlpProcess = spawn('yt-dlp', ytDlpArgs);
-
-      await new Promise((resolve, reject) => {
-        ytdlpProcess.stdout.on('data', (data) => {
-          const output = data.toString();
-          console.log('yt-dlp output:', output);
-          
-          // Parse progress from yt-dlp output
-          const progressMatch = output.match(/download:(\d+)\/(\d+)\/([^\/]+)\/(\d+)/);
-          if (progressMatch) {
-            const [, downloaded, total, speed, eta] = progressMatch;
-            const progressPercent = Math.round((parseInt(downloaded) / parseInt(total)) * 100);
-            
-            downloadProgress = {
-              ...downloadProgress,
-              progress: progressPercent,
-              downloaded: parseInt(downloaded),
-              total: parseInt(total),
-              speed: speed,
-              remaining: parseInt(eta),
-              stage: 'downloading_video'
-            };
-          }
-        });
-
-        ytdlpProcess.stderr.on('data', (data) => {
-          console.log('yt-dlp stderr:', data.toString());
-        });
-
-        ytdlpProcess.on('close', async (code) => {
-          if (code === 0) {
-            console.log('yt-dlp download completed');
-            resolve();
-          } else {
-            reject(new Error(`yt-dlp process exited with code ${code}`));
-          }
-        });
-      });
-
-      // If we get here, download was successful
-      return;
-      
-    } catch (error) {
-      lastError = error;
-      console.log(`Download attempt ${attempt} failed:`, error.message);
-      
-      if (attempt < maxRetries) {
-        const delay = PROXY_SETTINGS.retryDelay * attempt; // Exponential backoff
-        console.log(`Waiting ${delay}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-  
-  throw new Error(`All download attempts failed. Last error: ${lastError.message}`);
-}
-
 // OAuth-protected download endpoint
 app.post('/api/download-oauth', requireAuth, async (req, res) => {
   try {
-    const { url, filename = `video-${Date.now()}.mp4`, start = 0, end = 10, filepath } = req.body;
+    const { url, filename = `video-${Date.now()}.mp4`, start = 0, end = 10 } = req.body;
     
     // Initialize progress tracking
     downloadProgress = {
@@ -593,8 +416,6 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
       currentDownload: filename,
       stage: 'downloading_video'
     };
-    
-    const baseFilePath = path.join(__dirname, 'downloads', path.parse(filename).name);
     
     if (!fs.existsSync(path.join(__dirname, 'downloads'))) {
       fs.mkdirSync(path.join(__dirname, 'downloads'));
@@ -613,7 +434,7 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
 
     console.log('Processing video:', videoId, `(clip: ${start}s to ${end}s)`);
 
-    // Always use the default downloads directory for temporary files and processing
+    // Use temporary directory for processing only
     const tempDir = path.join(__dirname, 'downloads');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
@@ -621,15 +442,6 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
     
     const fullVideoPath = path.join(tempDir, `full-${filename}`);
     const tempOutputPath = path.join(tempDir, `clip-${filename}`);
-    
-    // Determine final output directory
-    const finalOutputDir = filepath ? path.dirname(filepath) : tempDir;
-    const outputPath = filepath || path.join(tempDir, filename);
-    
-    // Ensure output directory exists
-    if (!fs.existsSync(finalOutputDir)) {
-      fs.mkdirSync(finalOutputDir, { recursive: true });
-    }
 
     // Download video using YouTube Data API + direct download
     console.log('Getting video URL from YouTube Data API...');
@@ -650,7 +462,58 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
     // For now, let's try a different approach - use yt-dlp with better user agent and headers
     console.log('Downloading video with yt-dlp (with improved settings)...');
     
-    await downloadWithYtDlp(url, fullVideoPath);
+    const ytdlpProcess = spawn('yt-dlp', [
+      '-f', 'best[ext=mp4]/best',
+      '--merge-output-format', 'mp4',
+      '--progress-template', 'download:%(progress.downloaded_bytes)s/%(progress.total_bytes)s/%(progress.speed)s/%(progress.eta)s',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '--add-header', 'Accept-Encoding:gzip, deflate, br',
+      '--add-header', 'DNT:1',
+      '--add-header', 'Connection:keep-alive',
+      '--add-header', 'Upgrade-Insecure-Requests:1',
+      '--no-check-certificates',
+      '--extractor-args', 'youtube:player_client=web',
+      '-o', fullVideoPath,
+      url
+    ]);
+
+    await new Promise((resolve, reject) => {
+      ytdlpProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log('yt-dlp output:', output);
+        
+        // Parse progress from yt-dlp output
+        const progressMatch = output.match(/download:(\d+)\/(\d+)\/([^\/]+)\/(\d+)/);
+        if (progressMatch) {
+          const [, downloaded, total, speed, eta] = progressMatch;
+          const progressPercent = Math.round((parseInt(downloaded) / parseInt(total)) * 100);
+          
+          downloadProgress = {
+            ...downloadProgress,
+            progress: progressPercent,
+            downloaded: parseInt(downloaded),
+            total: parseInt(total),
+            speed: speed,
+            remaining: parseInt(eta),
+            stage: 'downloading_video'
+          };
+        }
+      });
+
+      ytdlpProcess.stderr.on('data', (data) => {
+        console.log('yt-dlp stderr:', data.toString());
+      });
+
+      ytdlpProcess.on('close', async (code) => {
+        if (code === 0) {
+          console.log('yt-dlp download completed');
+          resolve();
+        } else {
+          reject(new Error(`yt-dlp process exited with code ${code}`));
+        }
+      });
+    });
 
     // Update progress for ffmpeg stage
     downloadProgress = {
@@ -682,8 +545,28 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
 
     // Create clip using ffmpeg
     console.log('Creating clip...');
+    console.log(`ffmpeg command: ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${end - start} -c copy "${tempOutputPath}"`);
+    
     const duration = end - start;
-    await execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c copy "${tempOutputPath}"`);
+    try {
+      // Add timeout to prevent hanging
+      const ffmpegPromise = execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c copy "${tempOutputPath}"`);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('ffmpeg timeout')), 30000) // 30 second timeout
+      );
+      await Promise.race([ffmpegPromise, timeoutPromise]);
+      console.log('ffmpeg command completed successfully');
+    } catch (ffmpegError) {
+      console.error('ffmpeg error:', ffmpegError);
+      console.log('Trying ffmpeg with re-encoding...');
+      // Try with re-encoding if copy fails
+      const ffmpegPromise = execAsync(`ffmpeg -i "${fullVideoPath}" -ss ${start} -t ${duration} -c:v libx264 -c:a aac "${tempOutputPath}"`);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('ffmpeg re-encoding timeout')), 60000) // 60 second timeout for re-encoding
+      );
+      await Promise.race([ffmpegPromise, timeoutPromise]);
+      console.log('ffmpeg re-encoding completed successfully');
+    }
 
     // Verify the clip was created
     const clipStats = fs.statSync(tempOutputPath);
@@ -692,16 +575,7 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
     }
     console.log(`Clip file size: ${clipStats.size} bytes`);
 
-    // Move the final file to the user's selected location
-    let finalOutputPath = tempOutputPath;
-    if (finalOutputDir !== tempDir) {
-      console.log(`Moving file to: ${outputPath}`);
-      fs.copyFileSync(tempOutputPath, outputPath);
-      fs.unlinkSync(tempOutputPath); // Remove the temp file
-      finalOutputPath = outputPath;
-    }
-
-    console.log('Clip created and moved to final location. Sending file...');
+    console.log('Clip created successfully. Sending file to frontend...');
 
     // Update progress to completed
     downloadProgress = {
@@ -717,14 +591,13 @@ app.post('/api/download-oauth', requireAuth, async (req, res) => {
       'Content-Disposition': `attachment; filename="${filename}"`
     });
 
-    fs.createReadStream(finalOutputPath).pipe(res);
+    // Stream the clip directly to the frontend
+    fs.createReadStream(tempOutputPath).pipe(res);
 
     res.on('finish', () => {
+      // Clean up temporary files
       fs.unlink(fullVideoPath, () => {});
-      // Only delete the final file if it's in the temp directory
-      if (finalOutputDir === tempDir) {
-        fs.unlink(outputPath, () => {});
-      }
+      fs.unlink(tempOutputPath, () => {});
       console.log('Temporary files cleaned up');
       
       // Reset progress

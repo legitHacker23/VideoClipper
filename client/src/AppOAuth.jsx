@@ -104,16 +104,32 @@ export default function AppOAuth() {
       if (data.authenticated) {
         setIsAuthenticated(true);
         setUser(data.user);
+        // If user is authenticated via session, we need to get the token
+        if (data.user && !authToken) {
+          // Try to get the token from session
+          const tokenRes = await fetch(url.replace('/status', '/token'), {
+            credentials: 'include'
+          });
+          if (tokenRes.ok) {
+            const tokenData = await tokenRes.json();
+            if (tokenData.token) {
+              setAuthToken(tokenData.token);
+              console.log('Token retrieved from session:', tokenData.token);
+            }
+          }
+        }
         console.log('User authenticated:', data.user);
       } else {
         setIsAuthenticated(false);
         setUser(null);
+        setAuthToken(null);
         console.log('User not authenticated');
       }
     } catch (error) {
       console.error('Error checking auth status:', error);
       setIsAuthenticated(false);
       setUser(null);
+      setAuthToken(null);
     }
   };
 
@@ -250,7 +266,7 @@ export default function AppOAuth() {
       const res = await fetch(getApiUrl('download-oauth'), {
         method: 'POST',
         headers,
-        body: JSON.stringify({ url, start, end, filename, filepath }),
+        body: JSON.stringify({ url, start, end, filename }),
         credentials: 'include'
       });
 
@@ -310,15 +326,19 @@ export default function AppOAuth() {
 
     const fetchDuration = async () => {
       // Don't make API calls if not authenticated
-      if (!isAuthenticated || !authToken) {
-        console.log('Skipping API call - not authenticated or no token');
+      if (!isAuthenticated) {
+        console.log('Skipping API call - not authenticated');
         return;
       }
       
       try {
         const headers = { 'Content-Type': 'application/json' };
-        headers['Authorization'] = `Bearer ${authToken}`;
-        console.log('Sending API request with token:', authToken);
+        if (authToken) {
+          headers['Authorization'] = `Bearer ${authToken}`;
+          console.log('Sending API request with token:', authToken);
+        } else {
+          console.log('Sending API request with session authentication');
+        }
         
         const res = await fetch(getApiUrl('info-oauth'), {
           method: 'POST',
