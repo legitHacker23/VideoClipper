@@ -23,4 +23,18 @@ These documents are hosted on GitHub Pages and are publicly accessible for Googl
 
 ## Contact
 
-For questions about these documents, contact: freshbairclub@gmail.com 
+For questions about these documents, contact: freshbairclub@gmail.com
+
+## Releasing a new version
+
+```bash
+npm version minor       # bumps version and creates git tag
+git push --follow-tags  # triggers GitHub Actions
+```
+
+This will automatically:
+- Build installers for macOS, Windows, and Linux
+- Upload them to GitHub Releases
+- Enable auto-updates for users
+
+See [RELEASE_SETUP.md](RELEASE_SETUP.md) for detailed setup instructions. 
