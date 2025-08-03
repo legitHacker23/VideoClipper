@@ -506,7 +506,6 @@ async function downloadWithYtDlp(url, outputPath, maxRetries = PROXY_SETTINGS.ma
         '--fragment-retries', '3',
         '--sleep-interval', '2',
         '--max-sleep-interval', '5',
-        '--throttledratelimit', '100000',
         '--concurrent-fragments', '1',
         '--max-downloads', '1',
         '--no-playlist',
