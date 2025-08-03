@@ -67,11 +67,9 @@
       "target": "AppImage"
     }
   },
-  "publish": [
-    {
-      "provider": "github",
-      "owner": "legitHacker23",
-      "repo": "VideoClipper"
-    }
-  ]
+  "publish": {
+    "provider": "github",
+    "owner": "legitHacker23",
+    "repo": "VideoClipper"
+  }
 }
