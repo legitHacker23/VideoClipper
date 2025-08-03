@@ -13,7 +13,7 @@
     "dev:react": "npm --workspace client run dev",
     "dev:express": "node server/server.js",
     "dev:electron": "wait-on tcp:5173 && electron .",
-    "build": "npm --workspace client run build && electron-builder"
+    "build": "npm --workspace client run build && electron-builder --mac --win"
   },
   "keywords": [],
   "author": "",
@@ -62,22 +62,7 @@
     "win": {
       "target": "nsis",
       "publisherName": "YTClips"
-    },
-    "targets": [
-      {
-        "target": "dmg",
-        "arch": [
-          "arm64",
-          "x64"
-        ]
-      },
-      {
-        "target": "nsis",
-        "arch": [
-          "x64"
-        ]
-      }
-    ]
+    }
   },
   "publish": {
     "provider": "github",
