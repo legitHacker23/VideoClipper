@@ -1,6 +1,6 @@
 {
   "name": "ViralClipper",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Desktop video clipper app",
   "main": "electron/main.js",
   "workspaces": [
@@ -66,11 +66,16 @@
     "targets": [
       {
         "target": "dmg",
-        "arch": ["arm64", "x64"]
+        "arch": [
+          "arm64",
+          "x64"
+        ]
       },
       {
         "target": "nsis",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       }
     ]
   },
