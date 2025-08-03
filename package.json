@@ -1,7 +1,7 @@
 {
-  "name": "ytclips",
+  "name": "ViralClipper",
   "version": "1.0.3",
-  "description": "",
+  "description": "Desktop video clipper app",
   "main": "electron/main.js",
   "workspaces": [
     "client"
@@ -67,9 +67,11 @@
       "target": "AppImage"
     }
   },
-  "publish": {
+  "publish": [
+    {
     "provider": "github",
-    "owner": "legitHacker23",
-    "repo": "VideoClipper"
-  }
+      "owner": "legitHacker23",
+      "repo": "VideoClipper"
+    }
+  ]
 }
