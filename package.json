@@ -13,7 +13,7 @@
     "dev:react": "npm --workspace client run dev",
     "dev:express": "node server/server.js",
     "dev:electron": "wait-on tcp:5173 && electron .",
-    "build": "npm --workspace client run build && electron-builder -mwl"
+    "build": "npm --workspace client run build && electron-builder"
   },
   "keywords": [],
   "author": "",
