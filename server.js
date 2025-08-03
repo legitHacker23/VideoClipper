@@ -13,6 +13,9 @@ import session from 'express-session';
 import { google } from 'googleapis';
 import { PROXY_CONFIGS, PROXY_SETTINGS, getRandomUserAgent, validateProxyUrl } from './proxy-config.js';
 
+// Make sure the pip‑installed yt‑dlp in ~/.local/bin is found first
+process.env.PATH = `${process.env.HOME}/.local/bin:` + process.env.PATH;
+
 // Load environment variables
 dotenv.config();
 
@@ -501,7 +504,6 @@ async function downloadWithYtDlp(url, outputPath, maxRetries = PROXY_SETTINGS.ma
         '--no-check-certificates',
         '--retries', '3',
         '--fragment-retries', '3',
-        '--downloader-retries', '3',
         '--sleep-interval', '2',
         '--max-sleep-interval', '5',
         '--sleep-request-interval', '1',
